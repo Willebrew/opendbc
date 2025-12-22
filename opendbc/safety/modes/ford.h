@@ -294,11 +294,23 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     // These signals are not yet tested with the current safety limits
     bool violation = (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE) || (raw_path_angle != FORD_INACTIVE_PATH_ANGLE) || (raw_path_offset != FORD_INACTIVE_PATH_OFFSET);
 
-    // Check angle error and steer_control_enabled
-    // Note: Speed spoofing is handled in carcontroller.py, safety still validates against spoofed speed
-    // Real speed is still checked via PCM speed comparison in RX hook
-    int desired_curvature = raw_curvature - FORD_INACTIVE_CURVATURE;  // /FORD_STEERING_LIMITS.angle_deg_to_can to get real curvature
-    violation |= steer_angle_cmd_checks(desired_curvature, steer_control_enabled, FORD_CANFD_STEERING_LIMITS);
+    // TESTING MODE: Allow steering commands when vehicle is stationary (in park)
+    // This bypasses controls_allowed check for testing angular steering
+    if (!vehicle_moving) {
+      // Only check curvature limits when stationary, not controls_allowed
+      int desired_curvature = raw_curvature - FORD_INACTIVE_CURVATURE;
+      // Limit curvature to safe range for stationary testing
+      if ((desired_curvature < -500) || (desired_curvature > 500)) {
+        violation = true;  // Block excessive curvature requests
+      }
+    } else {
+      // Normal operation: full safety checks when moving
+      // Check angle error and steer_control_enabled
+      // Note: Speed spoofing is handled in carcontroller.py, safety still validates against spoofed speed
+      // Real speed is still checked via PCM speed comparison in RX hook
+      int desired_curvature = raw_curvature - FORD_INACTIVE_CURVATURE;  // /FORD_STEERING_LIMITS.angle_deg_to_can to get real curvature
+      violation |= steer_angle_cmd_checks(desired_curvature, steer_control_enabled, FORD_CANFD_STEERING_LIMITS);
+    }
 
     if (violation) {
       tx = false;
