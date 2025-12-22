@@ -32,7 +32,14 @@ def anti_overshoot(apply_curvature, apply_curvature_last, v_ego):
   return float(np.interp(v_ego, [5, 10], [apply_curvature, output_curvature]))
 
 
-def apply_ford_curvature_limits(apply_curvature, apply_curvature_last, current_curvature, v_ego_raw, steering_angle, lat_active, CP):
+def apply_ford_curvature_limits(apply_curvature, apply_curvature_last, current_curvature, v_ego_raw, steering_angle, lat_active, CP, angular_mode=False):
+  # F-150 Lightning angular mode: NO LIMITS - full steering authority
+  if angular_mode:
+    # Only clip to DBC maximum, no rate limits
+    apply_curvature = float(np.clip(apply_curvature, -0.02094, 0.02094))
+    return apply_curvature
+
+  # Normal mode: apply all standard limits
   # No blending at low speed due to lack of torque wind-up and inaccurate current curvature
   if v_ego_raw > 9:
     apply_curvature = np.clip(apply_curvature, current_curvature - CarControllerParams.CURVATURE_ERROR,
@@ -194,7 +201,7 @@ class CarController(CarControllerBase):
       current_curvature = -CS.out.yawRate / max(effective_speed, 0.1)
 
       self.apply_curvature_last = apply_ford_curvature_limits(apply_curvature, self.apply_curvature_last, current_curvature,
-                                                              effective_speed, 0., CC.latActive, self.CP)
+                                                              effective_speed, 0., CC.latActive, self.CP, self.angular_mode)
 
       if self.CP.flags & FordFlags.CANFD:
         # Ford uses four individual signals to dictate how to drive to the car. Curvature alone (limited to 0.02m/s^2)
