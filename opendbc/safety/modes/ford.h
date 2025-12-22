@@ -110,6 +110,10 @@ static bool ford_get_quality_flag_valid(const CANPacket_t *msg) {
 
 static const AngleSteeringLimits FORD_STEERING_LIMITS = FORD_LIMITS(false);
 
+// F-150 Lightning angular steering mode tracking
+static bool ford_angular_mode_active = false;
+static int ford_angular_mode_counter = 0;
+
 static void ford_rx_hook(const CANPacket_t *msg) {
   if (msg->bus == FORD_MAIN_BUS) {
     // Update in motion state from standstill signal
@@ -265,17 +269,34 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
   if (msg->addr == FORD_LateralMotionControl2) {
     static const AngleSteeringLimits FORD_CANFD_STEERING_LIMITS = FORD_LIMITS(true);
 
-    // Signal: LatCtl_D2_Rq
-    bool steer_control_enabled = ((msg->data[0] >> 4) & 0x7U) != 0U;
+    // Signal: LatCtl_D2_Rq (Mode: 0=None, 1=Limited, 2=Extended/Angular, 3=SafeRampOut)
+    unsigned int lat_mode = (msg->data[0] >> 4) & 0x7U;
+    bool steer_control_enabled = lat_mode != 0U;
     unsigned int raw_curvature = (msg->data[2] << 3) | (msg->data[3] >> 5);
     unsigned int raw_curvature_rate = (msg->data[6] << 3) | (msg->data[7] >> 5);
     unsigned int raw_path_angle = ((msg->data[3] & 0x1FU) << 6) | (msg->data[4] >> 2);
     unsigned int raw_path_offset = ((msg->data[4] & 0x3U) << 8) | msg->data[5];
 
+    // F-150 Lightning: Track angular steering mode (mode 2 = PathFollowingExtended)
+    // Require sustained mode 2 for at least 3 frames to activate angular mode
+    if (lat_mode == 2U) {
+      ford_angular_mode_counter = MIN(ford_angular_mode_counter + 1, 5);
+      if (ford_angular_mode_counter >= 3) {
+        ford_angular_mode_active = true;
+      }
+    } else {
+      ford_angular_mode_counter = MAX(ford_angular_mode_counter - 1, 0);
+      if (ford_angular_mode_counter == 0) {
+        ford_angular_mode_active = false;
+      }
+    }
+
     // These signals are not yet tested with the current safety limits
     bool violation = (raw_curvature_rate != FORD_CANFD_INACTIVE_CURVATURE_RATE) || (raw_path_angle != FORD_INACTIVE_PATH_ANGLE) || (raw_path_offset != FORD_INACTIVE_PATH_OFFSET);
 
     // Check angle error and steer_control_enabled
+    // Note: Speed spoofing is handled in carcontroller.py, safety still validates against spoofed speed
+    // Real speed is still checked via PCM speed comparison in RX hook
     int desired_curvature = raw_curvature - FORD_INACTIVE_CURVATURE;  // /FORD_STEERING_LIMITS.angle_deg_to_can to get real curvature
     violation |= steer_angle_cmd_checks(desired_curvature, steer_control_enabled, FORD_CANFD_STEERING_LIMITS);
 

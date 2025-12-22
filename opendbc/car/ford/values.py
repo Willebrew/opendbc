@@ -40,6 +40,12 @@ class CarControllerParams:
   MIN_GAS = -0.5
   INACTIVE_GAS = -5.0
 
+  # F-150 Lightning angular steering mode parameters
+  ANGULAR_MODE_THRESHOLD = 8.94      # m/s (20 mph) - switch to angular mode below this speed
+  ANGULAR_MODE_SPOOFED_SPEED = 2.24  # m/s (5 mph) - speed reported to steering system in angular mode
+  MODE_HYSTERESIS = 0.45             # m/s (~1 mph) - hysteresis deadband for mode switching
+  MODE_DEBOUNCE_TIME = 0.5           # seconds - minimum time between mode switches
+
   def __init__(self, CP):
     pass
 
@@ -52,6 +58,7 @@ class FordSafetyFlags(IntFlag):
 class FordFlags(IntFlag):
   # Static flags
   CANFD = 1
+  ANGULAR_STEERING = 2  # F-150 Lightning: Use angular mode below 20mph
 
 
 class RADAR:
@@ -119,6 +126,8 @@ class FordCANFDPlatformConfig(FordPlatformConfig):
 class FordF150LightningPlatform(FordCANFDPlatformConfig):
   def init(self):
     super().init()
+    # Enable angular steering mode for F-150 Lightning
+    self.flags |= FordFlags.ANGULAR_STEERING
 
     # Don't show in docs until this issue is resolved. See https://github.com/commaai/openpilot/issues/30302
     self.car_docs = []

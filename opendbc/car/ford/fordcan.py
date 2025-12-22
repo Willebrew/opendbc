@@ -85,8 +85,10 @@ def create_lat_ctl_msg(packer, CAN: CanBus, lat_active: bool, path_offset: float
   return packer.make_can_msg("LateralMotionControl", CAN.main, values)
 
 
+_lat_ctl2_log_counter = 0
+
 def create_lat_ctl2_msg(packer, CAN: CanBus, mode: int, path_offset: float, path_angle: float, curvature: float,
-                        curvature_rate: float, counter: int):
+                        curvature_rate: float, counter: int, angular_mode: bool = False):
   """
   Create a CAN message for the new Ford Lane Centering command.
 
@@ -94,10 +96,28 @@ def create_lat_ctl2_msg(packer, CAN: CanBus, mode: int, path_offset: float, path
   additional signals for a counter and checksum.
 
   Frequency is 20Hz.
+
+  Args:
+    angular_mode: F-150 Lightning only - use extended mode (2) for angular steering below 20mph
   """
+  global _lat_ctl2_log_counter
+
+  # F-150 Lightning: Use PathFollowingExtendedMode (2) for angular steering at low speeds
+  # Other vehicles: Use PathFollowingLimitedMode (1) for normal operation
+  if angular_mode and mode != 0:
+    lat_mode = 2  # PathFollowingExtendedMode for angular steering
+  else:
+    lat_mode = mode  # Use provided mode (0=off, 1=normal)
+
+  # Debug logging every ~5 seconds
+  _lat_ctl2_log_counter += 1
+  if _lat_ctl2_log_counter >= 100:
+    _lat_ctl2_log_counter = 0
+    from openpilot.common.swaglog import cloudlog
+    cloudlog.warning(f"create_lat_ctl2_msg: angular_mode={angular_mode}, input_mode={mode}, lat_mode={lat_mode}, curv={curvature:.4f}")
 
   values = {
-    "LatCtl_D2_Rq": mode,                       # Mode: 0=None, 1=PathFollowingLimitedMode, 2=PathFollowingExtendedMode,
+    "LatCtl_D2_Rq": lat_mode,                   # Mode: 0=None, 1=PathFollowingLimitedMode, 2=PathFollowingExtendedMode,
                                                 #       3=SafeRampOut, 4-7=NotUsed [0|7]
     "LatCtlRampType_D_Rq": 0,                   # 0=Slow, 1=Medium, 2=Fast, 3=Immediate [0|3]
     "LatCtlPrecision_D_Rq": 1,                  # 0=Comfortable, 1=Precise, 2/3=NotUsed [0|3]
@@ -112,7 +132,7 @@ def create_lat_ctl2_msg(packer, CAN: CanBus, mode: int, path_offset: float, path
 
   # calculate checksum
   dat = packer.make_can_msg("LateralMotionControl2", 0, values)[1]
-  values["LatCtlPath_No_Cs"] = calculate_lat_ctl2_checksum(mode, counter, dat)
+  values["LatCtlPath_No_Cs"] = calculate_lat_ctl2_checksum(lat_mode, counter, dat)
 
   return packer.make_can_msg("LateralMotionControl2", CAN.main, values)
 

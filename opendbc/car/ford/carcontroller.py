@@ -75,6 +75,64 @@ class CarController(CarControllerBase):
     self.lead_distance_bars_last = None
     self.distance_bar_frame = 0
 
+    # F-150 Lightning angular steering mode tracking
+    self.angular_mode = False
+    self.last_mode_switch_time = 0.0
+    self.angular_mode_last_logged = False
+    self.angular_debug_counter = 0
+
+    # Log startup info about angular steering capability
+    from openpilot.common.swaglog import cloudlog
+    has_angular = bool(self.CP.flags & FordFlags.ANGULAR_STEERING)
+    has_canfd = bool(self.CP.flags & FordFlags.CANFD)
+    cloudlog.warning(f"Ford CarController init: fingerprint={self.CP.carFingerprint}, CANFD={has_canfd}, ANGULAR_STEERING={has_angular}")
+
+  def _should_use_angular_mode(self, v_ego: float, current_time: float) -> bool:
+    """
+    Determine if angular steering mode should be used for F-150 Lightning.
+    Uses hysteresis to prevent rapid mode switching around threshold.
+
+    Args:
+      v_ego: Current vehicle speed in m/s
+      current_time: Current time in seconds
+
+    Returns:
+      True if angular mode should be used, False for normal mode
+    """
+    # Only enable for F-150 Lightning
+    if not (self.CP.flags & FordFlags.ANGULAR_STEERING):
+      return False
+
+    # Implement hysteresis:
+    # Switch to angular mode at (threshold - hysteresis)
+    # Switch to normal mode at (threshold + hysteresis)
+    lower_threshold = CarControllerParams.ANGULAR_MODE_THRESHOLD - CarControllerParams.MODE_HYSTERESIS
+    upper_threshold = CarControllerParams.ANGULAR_MODE_THRESHOLD + CarControllerParams.MODE_HYSTERESIS
+
+    # Determine target mode based on speed and hysteresis
+    target_mode = self.angular_mode  # Default to current mode
+    if v_ego < lower_threshold:
+      target_mode = True  # Angular mode (low speed)
+    elif v_ego > upper_threshold:
+      target_mode = False  # Normal mode (high speed)
+    # else: stay in current mode (hysteresis zone)
+
+    # Check debounce time - prevent mode switching too frequently
+    time_since_last_switch = current_time - self.last_mode_switch_time
+    if target_mode != self.angular_mode and time_since_last_switch < CarControllerParams.MODE_DEBOUNCE_TIME:
+      # Not enough time has passed, keep current mode
+      return self.angular_mode
+
+    # Update mode if it changed
+    if target_mode != self.angular_mode:
+      self.last_mode_switch_time = current_time
+      # Log mode transitions
+      from openpilot.common.swaglog import cloudlog
+      mode_name = "ANGULAR" if target_mode else "NORMAL"
+      cloudlog.info(f"F-150 Lightning steering mode change: {mode_name} @ {v_ego:.1f} m/s ({v_ego * 2.237:.1f} mph)")
+
+    return target_mode
+
   def update(self, CC, CC_SP, CS, now_nanos):
     can_sends = []
 
@@ -100,30 +158,48 @@ class CarController(CarControllerBase):
     ### lateral control ###
     # send steer msg at 20Hz
     if (self.frame % CarControllerParams.STEER_STEP) == 0:
+      # Check if angular steering mode should be used (F-150 Lightning only)
+      current_time_sec = now_nanos * 1e-9
+      self.angular_mode = self._should_use_angular_mode(CS.out.vEgo, current_time_sec)
+
+      # Debug logging every ~5 seconds (100 frames at 20Hz)
+      self.angular_debug_counter += 1
+      if self.angular_debug_counter >= 100:
+        self.angular_debug_counter = 0
+        from openpilot.common.swaglog import cloudlog
+        has_angular_flag = bool(self.CP.flags & FordFlags.ANGULAR_STEERING)
+        speed_mph = CS.out.vEgo * 2.237
+        cloudlog.warning(f"Ford steering: speed={speed_mph:.1f}mph, angular_mode={self.angular_mode}, "
+                        f"latActive={CC.latActive}, ANGULAR_FLAG={has_angular_flag}")
+
+      # Determine effective speed for steering calculations
+      # In angular mode, spoof 5mph to steering system for better low-speed control
+      effective_speed = CarControllerParams.ANGULAR_MODE_SPOOFED_SPEED if self.angular_mode else CS.out.vEgoRaw
+
       # Bronco and some other cars consistently overshoot curv requests
       # Apply some deadzone + smoothing convergence to avoid oscillations
       if self.CP.carFingerprint in (CAR.FORD_BRONCO_SPORT_MK1, CAR.FORD_F_150_MK14):
-        self.anti_overshoot_curvature_last = anti_overshoot(actuators.curvature, self.anti_overshoot_curvature_last, CS.out.vEgoRaw)
+        self.anti_overshoot_curvature_last = anti_overshoot(actuators.curvature, self.anti_overshoot_curvature_last, effective_speed)
         apply_curvature = self.anti_overshoot_curvature_last
       else:
         apply_curvature = actuators.curvature
 
       # apply rate limits, curvature error limit, and clip to signal range
-      current_curvature = -CS.out.yawRate / max(CS.out.vEgoRaw, 0.1)
+      current_curvature = -CS.out.yawRate / max(effective_speed, 0.1)
 
       self.apply_curvature_last = apply_ford_curvature_limits(apply_curvature, self.apply_curvature_last, current_curvature,
-                                                              CS.out.vEgoRaw, 0., CC.latActive, self.CP)
+                                                              effective_speed, 0., CC.latActive, self.CP)
 
       if self.CP.flags & FordFlags.CANFD:
-        # TODO: extended mode
         # Ford uses four individual signals to dictate how to drive to the car. Curvature alone (limited to 0.02m/s^2)
         # can actuate the steering for a large portion of any lateral movements. However, in order to get further control on
         # steer actuation, the other three signals are necessary. Ford controls vehicles differently than most other makes.
         # A detailed explanation on ford control can be found here:
         # https://www.f150gen14.com/forum/threads/introducing-bluepilot-a-ford-specific-fork-for-comma3x-openpilot.24241/#post-457706
+        # Mode 1 = PathFollowingLimited (normal), Mode 2 = PathFollowingExtended (angular for Lightning)
         mode = 1 if CC.latActive else 0
         counter = (self.frame // CarControllerParams.STEER_STEP) % 0x10
-        can_sends.append(fordcan.create_lat_ctl2_msg(self.packer, self.CAN, mode, 0., 0., -self.apply_curvature_last, 0., counter))
+        can_sends.append(fordcan.create_lat_ctl2_msg(self.packer, self.CAN, mode, 0., 0., -self.apply_curvature_last, 0., counter, self.angular_mode))
       else:
         can_sends.append(fordcan.create_lat_ctl_msg(self.packer, self.CAN, CC.latActive, 0., 0., -self.apply_curvature_last, 0.))
 
