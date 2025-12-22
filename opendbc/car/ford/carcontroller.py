@@ -33,9 +33,15 @@ def anti_overshoot(apply_curvature, apply_curvature_last, v_ego):
 
 
 def apply_ford_curvature_limits(apply_curvature, apply_curvature_last, current_curvature, v_ego_raw, steering_angle, lat_active, CP, angular_mode=False):
-  # F-150 Lightning angular mode: NO LIMITS - full steering authority
+  # F-150 Lightning angular mode: relaxed limits but keep rate limiting for PSCM compatibility
   if angular_mode:
-    # Only clip to DBC maximum, no rate limits
+    # Apply rate limit - PSCM rejects commands that change too fast
+    max_rate = 0.001  # per step (20Hz) - faster than normal but still smooth
+    if lat_active:
+      apply_curvature = np.clip(apply_curvature,
+                                apply_curvature_last - max_rate,
+                                apply_curvature_last + max_rate)
+    # Clip to DBC maximum (slightly higher than normal 0.02 limit)
     apply_curvature = float(np.clip(apply_curvature, -0.02094, 0.02094))
     return apply_curvature
 
