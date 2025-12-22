@@ -38,11 +38,11 @@ def apply_ford_curvature_limits(apply_curvature, apply_curvature_last, current_c
     apply_curvature = np.clip(apply_curvature, current_curvature - CarControllerParams.CURVATURE_ERROR,
                               current_curvature + CarControllerParams.CURVATURE_ERROR)
 
-  # Curvature rate limit - always apply this (PSCM requires smooth transitions)
-  apply_curvature = apply_std_steer_angle_limits(apply_curvature, apply_curvature_last, v_ego_raw, steering_angle, lat_active, CarControllerParams.ANGLE_LIMITS)
+  # Curvature rate limit - use higher max curvature in angular mode for tighter turns
+  angle_limits = CarControllerParams.ANGULAR_ANGLE_LIMITS if angular_mode else CarControllerParams.ANGLE_LIMITS
+  apply_curvature = apply_std_steer_angle_limits(apply_curvature, apply_curvature_last, v_ego_raw, steering_angle, lat_active, angle_limits)
 
-  # Ford Q4/CAN FD lateral acceleration limit
-  # F-150 Lightning angular mode: SKIP this limit to allow tighter turns at low speed
+  # Ford Q4/CAN FD lateral acceleration limit - skip in angular mode
   if CP.flags & FordFlags.CANFD and not angular_mode:
     curvature_accel_limit = MAX_LATERAL_ACCEL / (max(v_ego_raw, 1) ** 2)
     apply_curvature = float(np.clip(apply_curvature, -curvature_accel_limit, curvature_accel_limit))

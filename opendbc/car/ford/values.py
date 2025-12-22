@@ -33,6 +33,13 @@ class CarControllerParams:
     ([5, 25], [0.00045, 0.0001]),
     ([5, 25], [0.00045, 0.00015])
   )
+
+  # F-150 Lightning angular mode: higher max curvature (DBC max), same rate limits
+  ANGULAR_ANGLE_LIMITS: AngleSteeringLimits = AngleSteeringLimits(
+    0.02094,  # DBC maximum curvature - allows tighter turns
+    ([5, 25], [0.00045, 0.0001]),
+    ([5, 25], [0.00045, 0.00015])
+  )
   CURVATURE_ERROR = 0.002  # ~6 degrees at 10 m/s, ~10 degrees at 35 m/s
 
   ACCEL_MAX = 2.0               # m/s^2 max acceleration
