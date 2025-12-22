@@ -174,23 +174,24 @@ class CarController(CarControllerBase):
         # Make it obvious in logs
         cloudlog.warning(f"[STEER] {mode_str} | {speed_mph:.0f}mph | curv={curv:.4f} | PSCM={pscm_str}")
 
-      # Determine effective speed for steering calculations
-      # In angular mode, spoof 5mph to steering system for better low-speed control
-      effective_speed = CarControllerParams.ANGULAR_MODE_SPOOFED_SPEED if self.angular_mode else CS.out.vEgoRaw
+      # Use REAL speed for rate limits (must match panda safety)
+      # Only use spoofed speed for anti-overshoot calculations
+      real_speed = CS.out.vEgoRaw
 
       # Bronco and some other cars consistently overshoot curv requests
       # Apply some deadzone + smoothing convergence to avoid oscillations
       if self.CP.carFingerprint in (CAR.FORD_BRONCO_SPORT_MK1, CAR.FORD_F_150_MK14):
-        self.anti_overshoot_curvature_last = anti_overshoot(actuators.curvature, self.anti_overshoot_curvature_last, effective_speed)
+        self.anti_overshoot_curvature_last = anti_overshoot(actuators.curvature, self.anti_overshoot_curvature_last, real_speed)
         apply_curvature = self.anti_overshoot_curvature_last
       else:
         apply_curvature = actuators.curvature
 
       # apply rate limits, curvature error limit, and clip to signal range
-      current_curvature = -CS.out.yawRate / max(effective_speed, 0.1)
+      # IMPORTANT: Use real speed so rate limits match panda safety checks
+      current_curvature = -CS.out.yawRate / max(real_speed, 0.1)
 
       self.apply_curvature_last = apply_ford_curvature_limits(apply_curvature, self.apply_curvature_last, current_curvature,
-                                                              effective_speed, 0., CC.latActive, self.CP, self.angular_mode)
+                                                              real_speed, 0., CC.latActive, self.CP, self.angular_mode)
 
       if self.CP.flags & FordFlags.CANFD:
         # Ford uses four individual signals to dictate how to drive to the car. Curvature alone (limited to 0.02m/s^2)
