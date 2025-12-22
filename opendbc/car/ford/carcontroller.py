@@ -161,21 +161,18 @@ class CarController(CarControllerBase):
       current_time_sec = now_nanos * 1e-9
       self.angular_mode = self._should_use_angular_mode(CS.out.vEgo, current_time_sec)
 
-      # Debug logging every ~5 seconds (100 frames at 20Hz)
+      # Debug logging every ~2 seconds (40 frames at 20Hz) - more frequent for testing
       self.angular_debug_counter += 1
-      if self.angular_debug_counter >= 100:
+      if self.angular_debug_counter >= 40:
         self.angular_debug_counter = 0
         from openpilot.common.swaglog import cloudlog
-        has_angular_flag = bool(self.CP.flags & FordFlags.ANGULAR_STEERING)
         speed_mph = CS.out.vEgo * 2.237
-        # PSCM status names for logging
-        pscm_status_names = {0: "Unavailable", 1: "Available", 2: "InProgress", 3: "RampOut", 4: "Denied"}
-        pscm_cap_names = {0: "NoMode", 1: "LimitedOnly", 2: "ExtendedAvail", 3: "Faulty"}
-        pscm_status_str = pscm_status_names.get(CS.pscm_status, f"Unknown({CS.pscm_status})")
-        pscm_cap_str = pscm_cap_names.get(CS.pscm_capability, f"Unknown({CS.pscm_capability})")
-        cloudlog.warning(f"Ford steering: speed={speed_mph:.1f}mph, angular_mode={self.angular_mode}, "
-                        f"latActive={CC.latActive}, ANGULAR_FLAG={has_angular_flag}, "
-                        f"PSCM_status={pscm_status_str}, PSCM_capability={pscm_cap_str}")
+        mode_str = "ANGULAR" if self.angular_mode else "NORMAL"
+        pscm_status_names = {0: "Unavail", 1: "Avail", 2: "InProg", 3: "RampOut", 4: "Denied"}
+        pscm_str = pscm_status_names.get(CS.pscm_status, "?")
+        curv = abs(self.apply_curvature_last)
+        # Make it obvious in logs
+        cloudlog.warning(f"[STEER] {mode_str} | {speed_mph:.0f}mph | curv={curv:.4f} | PSCM={pscm_str}")
 
       # Determine effective speed for steering calculations
       # In angular mode, spoof 5mph to steering system for better low-speed control
