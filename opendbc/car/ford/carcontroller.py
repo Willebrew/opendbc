@@ -169,8 +169,14 @@ class CarController(CarControllerBase):
         from openpilot.common.swaglog import cloudlog
         has_angular_flag = bool(self.CP.flags & FordFlags.ANGULAR_STEERING)
         speed_mph = CS.out.vEgo * 2.237
+        # PSCM status names for logging
+        pscm_status_names = {0: "Unavailable", 1: "Available", 2: "InProgress", 3: "RampOut", 4: "Denied"}
+        pscm_cap_names = {0: "NoMode", 1: "LimitedOnly", 2: "ExtendedAvail", 3: "Faulty"}
+        pscm_status_str = pscm_status_names.get(CS.pscm_status, f"Unknown({CS.pscm_status})")
+        pscm_cap_str = pscm_cap_names.get(CS.pscm_capability, f"Unknown({CS.pscm_capability})")
         cloudlog.warning(f"Ford steering: speed={speed_mph:.1f}mph, angular_mode={self.angular_mode}, "
-                        f"latActive={CC.latActive}, ANGULAR_FLAG={has_angular_flag}")
+                        f"latActive={CC.latActive}, ANGULAR_FLAG={has_angular_flag}, "
+                        f"PSCM_status={pscm_status_str}, PSCM_capability={pscm_cap_str}")
 
       # Determine effective speed for steering calculations
       # In angular mode, spoof 5mph to steering system for better low-speed control

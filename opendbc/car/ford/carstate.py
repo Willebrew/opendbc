@@ -23,6 +23,11 @@ class CarState(CarStateBase, MadsCarState):
     self.distance_button = 0
     self.lc_button = 0
 
+    # PSCM status for angular steering mode debugging
+    self.pscm_status = 0
+    self.pscm_capability = 0
+    self.pscm_extended_available = False
+
   def update(self, can_parsers) -> tuple[structs.CarState, structs.CarStateSP]:
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
@@ -58,7 +63,16 @@ class CarState(CarStateBase, MadsCarState):
 
     if self.CP.flags & FordFlags.CANFD:
       # this signal is always 0 on non-CAN FD cars
-      ret.steerFaultTemporary |= cp.vl["Lane_Assist_Data3_FD1"]["LatCtlSte_D_Stat"] not in (1, 2, 3)
+      lat_ctl_status = cp.vl["Lane_Assist_Data3_FD1"]["LatCtlSte_D_Stat"]
+      lat_ctl_capability = cp.vl["Lane_Assist_Data3_FD1"]["LatCtlCpblty_D_Stat"]
+      ret.steerFaultTemporary |= lat_ctl_status not in (1, 2, 3)
+
+      # Store PSCM status for debugging angular steering mode
+      # LatCtlCpblty_D_Stat: 0=NoModeAvailable, 1=LimitedModeAvailable, 2=ExtendedModeAvailable, 3=Faulty
+      # LatCtlSte_D_Stat: 0=Unavailable, 1=Available, 2=ContLatControlInProgress, 3=RampOut, 4=Denied
+      self.pscm_status = lat_ctl_status
+      self.pscm_capability = lat_ctl_capability
+      self.pscm_extended_available = lat_ctl_capability == 2
 
     # cruise state
     is_metric = cp.vl["INSTRUMENT_PANEL"]["METRIC_UNITS"] == 1 if not self.CP.flags & FordFlags.CANFD else False
