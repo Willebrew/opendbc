@@ -87,8 +87,9 @@ static bool ford_get_quality_flag_valid(const CANPacket_t *msg) {
 #define FORD_CANFD_INACTIVE_CURVATURE_RATE 1024U
 
 // Curvature rate limits
+// F-150 Lightning angular mode uses 0.02094 max curvature (1047 = 0.02094 * 50000)
 #define FORD_LIMITS(limit_lateral_acceleration) {                                               \
-  .max_angle = 1000,          /* 0.02 curvature */                                              \
+  .max_angle = 1047,          /* 0.02094 curvature - DBC max for angular steering */            \
   .angle_deg_to_can = 50000,  /* 1 / (2e-5) rad to can */                                       \
   .max_angle_error = 100,     /* 0.002 * FORD_STEERING_LIMITS.angle_deg_to_can */               \
   .angle_rate_up_lookup = {                                                                     \
