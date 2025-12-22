@@ -33,31 +33,17 @@ def anti_overshoot(apply_curvature, apply_curvature_last, v_ego):
 
 
 def apply_ford_curvature_limits(apply_curvature, apply_curvature_last, current_curvature, v_ego_raw, steering_angle, lat_active, CP, angular_mode=False):
-  # F-150 Lightning angular mode: relaxed limits but keep rate limiting for PSCM compatibility
-  if angular_mode:
-    # Apply rate limit - PSCM rejects commands that change too fast
-    max_rate = 0.001  # per step (20Hz) - faster than normal but still smooth
-    if lat_active:
-      apply_curvature = np.clip(apply_curvature,
-                                apply_curvature_last - max_rate,
-                                apply_curvature_last + max_rate)
-    # Clip to DBC maximum (slightly higher than normal 0.02 limit)
-    apply_curvature = float(np.clip(apply_curvature, -0.02094, 0.02094))
-    return apply_curvature
-
-  # Normal mode: apply all standard limits
   # No blending at low speed due to lack of torque wind-up and inaccurate current curvature
   if v_ego_raw > 9:
     apply_curvature = np.clip(apply_curvature, current_curvature - CarControllerParams.CURVATURE_ERROR,
                               current_curvature + CarControllerParams.CURVATURE_ERROR)
 
-  # Curvature rate limit after driver torque limit
+  # Curvature rate limit - always apply this (PSCM requires smooth transitions)
   apply_curvature = apply_std_steer_angle_limits(apply_curvature, apply_curvature_last, v_ego_raw, steering_angle, lat_active, CarControllerParams.ANGLE_LIMITS)
 
-  # Ford Q4/CAN FD has more torque available compared to Q3/CAN so we limit it based on lateral acceleration.
-  # Safety is not aware of the road roll so we subtract a conservative amount at all times
-  if CP.flags & FordFlags.CANFD:
-    # Limit curvature to conservative max lateral acceleration
+  # Ford Q4/CAN FD lateral acceleration limit
+  # F-150 Lightning angular mode: SKIP this limit to allow tighter turns at low speed
+  if CP.flags & FordFlags.CANFD and not angular_mode:
     curvature_accel_limit = MAX_LATERAL_ACCEL / (max(v_ego_raw, 1) ** 2)
     apply_curvature = float(np.clip(apply_curvature, -curvature_accel_limit, curvature_accel_limit))
 
